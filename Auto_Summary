@@ -1,0 +1,292 @@
+# existing data = file database
+# new data = data that use for update
+# final data = เก็บข้อมูลเดิม + การ อัปเดตข้อมูลล่าสุด จาก new data
+import pandas as pd
+from google.colab import files
+from datetime import datetime
+import openpyxl # Ensure openpyxl is imported for ExcelWriter engine
+
+# Key Customers
+key_customers_list = [
+    "100241", "100244", "100252", "100337", "100550", "100578", "100579", "100599", "100711", "100747",
+    "100768", "100798", "100842", "100900", "100958", "101164", "101223", "101259", "101309", "101359",
+    "101361", "101363", "101508", "101511", "101516", "101546", "101728", "101781", "101787", "101840",
+    "101957", "102004", "102101", "102127", "102148", "102204", "102246", "102293", "104523", "104655",
+    "104931", "105129", "105140", "101386", "104085"
+]
+
+print("Upload Updated Data file")
+uploaded_old = files.upload()
+update_filename = next(iter(uploaded_old)) #อ่านไฟล์ที่เข้ามาในcollab
+existing_data = pd.read_excel(update_filename) #Read file
+
+print("Upload All Project Data file")
+uploaded_new = files.upload()
+new_filename = next(iter(uploaded_new))
+new_data = pd.read_excel(new_filename, sheet_name='All Project Data')
+
+#สร้าง col เอาแค่ข้อมูลคอลัมน์ที่ต้องการ
+cols_total = new_data.shape[1] #ดึงจำนวนคอลัมน์ทั้งหมด ของ DataFrame new_data
+cols_main = new_data.iloc[:, 0:26] #เลือกคอลัมน์
+cols_extra = new_data.iloc[:, 103:110] if cols_total >= 110 else pd.DataFrame()
+#ถ้าใช่ → ดึงคอลัมน์ลำดับที่ 103 ถึง 109 (รวม 7 คอลัมน์)
+#ถ้าไม่ถึง 110 คอลัมน์ → สร้าง cols_extra เป็น DataFrame เปล่า แทน จะได้ไม่ errorตอนสร้าง new data
+
+new_data = pd.concat([cols_main, cols_extra], axis=1) #sum cols
+
+# แก้ชื่อคอลัมน์สะกดผิด
+rename_cols = {
+    "Winnner Value": "Winner Value",
+    "WinnnerValue": "Winner Value",
+    "WinnerValue": "Winner Value",
+    "Project ID": "ProjectID",
+    "Project Id": "ProjectID",
+    "projectid": "ProjectID",
+    "Status Running_Status": "StatusRunning_Status",
+
+    "Winer Name": "WinnerName",
+    "WinerName": "WinnerName",
+    "Winner Name ": "WinnerName",
+    "Winnername": "WinnerName",
+    "Winer Date": "WinnerDate",
+    "WinerDate": "WinnerDate",
+    "Winer Value": "Winner Value",
+    "WinerValue": "Winner Value",
+    "Winner Value ": "Winner Value",
+    "Winnervalue": "Winner Value",
+}
+
+# เปลี่ยน columns Index เป็น string ก่อน strip
+new_data.columns = new_data.columns.astype(str).str.strip() # strip
+new_data = new_data.rename(columns=rename_cols) #ใช้ rename() เพื่อ เปลี่ยนชื่อคอลัมน์ ตามที่กำหนดไว้ใน dictionary rename_cols
+new_data["Budget"] = new_data["Budget"].astype(str).str.replace(',', '').str.replace(' ', '').astype(float)
+new_data["Date"] = pd.to_datetime(new_data["Date"], errors='coerce').dt.strftime('%Y-%m-%d')
+new_data_filtered = new_data[new_data["Budget"] >= 10000000]
+
+# กรองเฉพาะ Budget >= 10 ล้าน ก่อนใช้ต่อ
+existing_data.columns = existing_data.columns.astype(str).str.strip()  # ป้องกันชื่อคอลัมน์เพี้ยน
+existing_data = existing_data.rename(columns=rename_cols)  # แก้ชื่อคอลัมน์ให้สอดคล้อง
+if "Budget" in existing_data.columns:
+    existing_data["Budget"] = existing_data["Budget"].astype(str).str.replace(',', '').str.replace(' ', '').astype(float)
+    existing_data = existing_data[existing_data["Budget"] >= 10000000].copy()
+    existing_data["Date"] = pd.to_datetime(existing_data["Date"], errors='coerce').dt.strftime('%Y-%m-%d')
+
+# Ensure columns are in the desired order and only include those present after renaming
+desired_order = [
+    "Date", "ProjectID", "Procurement Method", "Subject", "Location", "Owner", "Province", "Region",
+    "Budget", "TOR", "Type", "Bid document Start", "Bid document End", "BiddingDate", "RobotWorking",
+    "Sale Owner Name", "WinnerName", "WinnerDate", "Winner Value", "PurchaseDoc", "Contract e-GP",
+    "Contract Number", "SignDate", "Contract End Date", "StatusDate", "StatusRunning_Status", # ใช้ชื่อที่แก้ไขแล้ว
+    "SalesPersonCode", "CustomerGroup", "CustomerCode", "CustomerName", "Document Link", "Robot Tracking Status"
+]
+
+if existing_data.empty or "ProjectID" not in existing_data.columns: #ถ้าเงื่อนไขใดเงื่อนไขหนึ่ง เป็นจริง → จะต้องสร้างตาราง existing_data ขึ้นมาใหม่
+    desired_order_filtered = [col for col in desired_order if col in new_data_filtered.columns] # สร้าง DataFrame เปล่าพร้อมคอลัมน์ที่ถูกต้องตาม desired_order
+    existing_data = pd.DataFrame(columns=desired_order_filtered) # สร้าง existing_data กรณีที่อัพไฟล์เปล่าเป็น ไฟล์อัพเดต
+
+
+# ใช้ .copy() หัวข้อมาจากdesired_order เพื่อชัวว่าจะมีครบทุกหัวข้อ
+new_data_filtered = new_data_filtered[[col for col in desired_order if col in new_data_filtered.columns]].copy() # กรองคอลัมน์ตาม desired_order หลังจากที่ได้ทำการ rename ไปแล้ว
+existing_data = existing_data[[col for col in desired_order if col in existing_data.columns]].copy()
+
+# ป้องกัน KeyError: 'ProjectID' อีกครั้ง หลังจากการ rename (Use for check)
+if "ProjectID" not in new_data_filtered.columns or "ProjectID" not in existing_data.columns:
+    raise ValueError("❌ ไม่พบคอลัมน์ 'ProjectID' ในข้อมูลหลังการแก้ไขชื่อคอลัมน์ กรุณาตรวจสอบไฟล์")
+
+# check ว่ามี ProjectID แล้วก็ใช้เป็น index
+existing_data = existing_data.set_index("ProjectID")
+new_data_filtered = new_data_filtered.set_index("ProjectID")
+
+# รวมคอลัมน์ทั้งหมดจากทั้งสอง DataFrame เพื่อให้ update ทำงานได้ถูกต้อง
+all_columns = existing_data.columns.union(new_data_filtered.columns) #รวมชื่อคอลัมน์จากทั้ง existing_data และ new_data_filtered เข้าด้วยกัน (แบบไม่ซ้ำกัน)
+existing_data = existing_data.reindex(columns=all_columns) #เป็นการจัดรูปแบบให้ DataFrame มีคอลัมน์ตาม all_columns
+new_data_filtered = new_data_filtered.reindex(columns=all_columns)
+
+existing_data.update(new_data_filtered)
+#อัปเดตค่าข้อมูลใน existing_data เฉพาะแถวที่ index (ProjectID) ตรงกัน กับ new_data_filtered
+#ถ้าข้อมูลใหม่มีค่าในบางช่อง → ค่านั้นจะไปแทนของเก่า or ช่องว่าง (NaN) ใน new_data_filtered จะไม่แทนของเดิม
+
+new_only = new_data_filtered.loc[~new_data_filtered.index.isin(existing_data.index)].reset_index().copy() #ตรวจสอบว่าแต่ละ ProjectID ใน new_data_filtered มีอยู่ใน existing_data หรือไม่
+new_only["CustomerCode_str"] = new_only["CustomerCode"].fillna(0).astype(int).astype(str) # หา row ใหม่ที่ไม่ซ้ำใน existing_data และ reset index พร้อมสร้าง CustomerCode_str เพื่อใช้แทน CustomerCode กันกรณีNaN
+
+# รวมข้อมูลสุดท้ายโดยใช้ new_only ที่ reset index แล้ว (ProjectID กลับมาเป็นคอลัมน์)
+# ต้อง set_index "ProjectID" ให้ new_only อีกครั้งก่อน concat เพื่อให้ align ตาม ProjectID
+final_data = pd.concat([existing_data, new_only.set_index("ProjectID")]).reset_index().copy()
+
+# จัดเรียงคอลัมน์สุดท้ายตาม desired_order อีกครั้ง
+final_data = final_data[[col for col in desired_order if col in final_data.columns]]
+
+# สร้าง CustomerCode_str ใน final_data สำหรับใช้ใน tracking functions
+final_data["CustomerCode_str"] = final_data["CustomerCode"].fillna(0).astype(int).astype(str)
+
+today_str = datetime.now().strftime('%Y-%m-%d')
+updated_file = f"Updated_Data_{today_str}.xlsx"
+final_data.to_excel(updated_file, index=False)
+files.download(updated_file) #Update file dowload
+
+#--------------------------------------------------Summary-----------------------------------------------------------#
+
+# ฟังก์ชัน tracking ของall data(ใช้ row[col_name] ได้หลัง reset_index)
+def create_tracking(df):
+    tracking_rows = []
+    # ตรวจสอบให้แน่ใจว่ามี CustomerCode_str
+    if "CustomerCode_str" not in df.columns:
+         df["CustomerCode_str"] = df["CustomerCode"].fillna(0).astype(int).astype(str)
+
+    # ใช้ 'CustomerCode_str' และ 'CustomerName' สำหรับการจัดกลุ่ม
+    # ใช้ dropna=False เพื่อรวม NaN ในการจัดกลุ่มด้วย
+    grouped = df.groupby(["CustomerCode_str", "CustomerName"], sort=False, dropna=False) #จัดข้อมูลจากCustomerCode และname
+    for (code, name), group in grouped: #วนในแต่ละcustomercode
+        # ปรับ code ให้แสดง 'ไม่ระบุ CustomerCode' ถ้า code เป็น '0'
+        display_code = code if code != '0' else "ไม่ระบุ CustomerCode"
+        tracking_rows.append({
+            "CustomerCode": display_code,
+            "CustomerName": name,
+            "ProjectID": f"Total Projects: {len(group)}",
+            "Winner Value": "",
+            "Contract Number": "",
+            "SignDate": "",
+            "Contract End Date": "",
+        })
+        # วนลูปผ่านแต่ละโครงการใน customer code
+        for index, row in group.iterrows():
+            # เปลี่ยน row data ให้เป็น dictionary แทน list
+            tracking_rows.append({
+                "CustomerCode": "",
+                "CustomerName": "",
+                "ProjectID": row.get("ProjectID", ""), # ใช้ .get() ป้องกัน error ถ้าไม่มีคอลัมน์
+                "Winner Value": row.get("Winner Value", ""),
+                "Contract Number": row.get("Contract Number", ""),
+                "SignDate": row.get("SignDate", ""),
+                "Contract End Date": row.get("Contract End Date", "")
+            })
+    # ระบุชื่อคอลัมน์เมื่อสร้าง DataFrame
+    return pd.DataFrame(tracking_rows, columns=["CustomerCode", "CustomerName", "ProjectID", "Winner Value", "Contract Number", "SignDate", "Contract End Date"])
+
+# ฟังก์ชันสรุป แสดงครบ ทั้งมี-ไม่มี Winner ของsummary (Revised to be cleaner and handle '0' code)
+def create_grouped_tracking(df, customer_type):
+    tracking_list = []
+    # ตรวจสอบให้แน่ใจว่ามี CustomerCode_str
+    if "CustomerCode_str" not in df.columns:
+         df["CustomerCode_str"] = df["CustomerCode"].fillna(0).astype(int).astype(str)
+
+    # จัดกลุ่มตาม CustomerCode_str และ CustomerName
+    grouped = df.groupby(["CustomerCode_str", "CustomerName"], dropna=False, sort=False) # ใช้ dropna=False และ sort=False
+
+    for (code, name), group in grouped:
+        # กรอง row ที่มีค่าใน "Winner Value" และไม่ใช่ค่าว่างหรือ NaN
+        group_with_winner = group[group.get("Winner Value", pd.NA).notna() & (group.get("Winner Value", "") != "")]
+        has_winner_projects = len(group_with_winner) > 0
+
+        # กำหนด code ที่จะแสดง และจำนวนโครงการที่จะนับ
+        display_code = code if code != '0' else "ไม่ระบุ CustomerCode"
+        display_count = len(group_with_winner) if has_winner_projects else len(group) # นับเฉพาะโครงการที่มี Winner ถ้ามี, otherwise นับทั้งหมด
+
+        # เพิ่มแถวสรุปกลุ่ม
+        tracking_list.append({
+            "CustomerCode": display_code,
+            "CustomerName": name,
+            "ProjectID": f"Total Projects: {display_count}",
+            "Winner Value": "ยังไม่มี Winner Name" if not has_winner_projects else "",
+            "Contract Number": "",  # ช่องว่างสำหรับ Contract Number
+            "SignDate": "" ,# ช่องว่างสำหรับ SignDate
+            "Contract End Date": ""# ช่องว่างสำหรับ Contract End Date
+        })
+
+        # วนลูปผ่านแต่ละ row ในกลุ่มที่เลือกแสดง (มี winner หรือทั้งหมด ถ้าไม่มี winner)
+        rows_to_iterate = group_with_winner if has_winner_projects else group
+        for index, row in rows_to_iterate.iterrows():
+             # เปลี่ยน row data ให้เป็น dictionary แทน list
+            tracking_list.append({
+                "CustomerCode": "", # CustomerCode
+                "CustomerName": "", # CustomerName
+                "ProjectID": row.get("ProjectID", ""),
+                "Winner Value": row.get("Winner Value", ""),
+                "Contract Number": row.get("Contract Number", ""),
+                "SignDate": row.get("SignDate", ""),
+                "Contract End Date": row.get("Contract End Date", ""),
+             })
+    # ระบุชื่อคอลัมน์เมื่อสร้าง DataFrame ให้ตรงกับ create_tracking
+    # กำหนดคอลัมน์ที่แน่นอนเพื่อให้ DataFrame สร้างได้อย่างถูกต้อง
+    return pd.DataFrame(tracking_list, columns=[
+        "CustomerCode", "CustomerName", "ProjectID", "Winner Value","Contract Number", "SignDate", "Contract End Date"  ])
+
+# Create Customer Tracking (from all final_data)
+# final_data already has CustomerCode_str
+customer_tracking = create_tracking(final_data)
+
+# Create Key Customer Tracking (from filtered final_data)
+# Create key customer data by copying rows where "CustomerCode_str" is in the list
+key_customers_data_for_tracking = final_data[final_data["CustomerCode_str"].isin(key_customers_list)].copy()
+key_customer_tracking = create_tracking(key_customers_data_for_tracking)
+
+#Difference data
+# ดึงจำนวนรอบก่อนหน้า (จาก existing_data)
+prev_project_count = len(existing_data)
+prev_customers_count = existing_data["CustomerCode"].fillna(0).astype(int).astype(str).nunique()
+prev_key_customers_count = existing_data[
+    existing_data["CustomerCode"].fillna(0).astype(int).astype(str).isin(key_customers_list)
+]["CustomerCode"].nunique()
+
+# ดึงจำนวนรอบนี้ (จาก final_data)
+new_project_count = len(final_data)
+new_customers_count = final_data["CustomerCode"].fillna(0).astype(int).astype(str).nunique()
+new_key_customers_count = final_data[
+    final_data["CustomerCode"].fillna(0).astype(int).astype(str).isin(key_customers_list)
+]["CustomerCode"].nunique()
+
+# คำนวณผลต่าง
+diff_project = new_project_count - prev_project_count
+diff_customers = new_customers_count - prev_customers_count
+diff_key_customers = new_key_customers_count - prev_key_customers_count
+
+#--------------------------------------------------Create Excel-----------------------------------------------------------#
+
+# สร้างรายงาน Excel พร้อมหลายชีท
+report_file = f"Customer_Tracking_Report_{today_str}.xlsx"
+with pd.ExcelWriter(report_file, engine="openpyxl") as writer:
+    # สร้างและเขียน Sheet "Summary Report"
+    summary_data = pd.DataFrame({
+        "รายการ": [
+            "Total Projects (จำนวนโครงการทั้งหมด ณ ตอนนี้)",
+            "Total Key Customers Projects  (จำนวนลูกค้าของ Nila ทั้งหมด ณ ตอนนี้)",
+            "Total Other Customers Projects (จำนวนโครงการทั้งหมด ณ ตอนนี้)"
+        ],
+        "จำนวน": [
+            f"{new_project_count} (+{diff_project})",
+            f"{new_key_customers_count} (+{diff_key_customers})",
+            f"{new_customers_count} (+{diff_customers})"
+        ]
+    })
+    summary_data.to_excel(writer, sheet_name="Summary Report", startrow=0, index=False)
+
+    # สร้างและเขียน Key Projects Tracking (เฉพาะโครงการใหม่ใน new_only) ใน Summary Report
+    # ใช้ .copy() เพื่อป้องกัน SettingWithCopyWarning
+    key_projects_new = new_only[new_only["CustomerCode_str"].isin(key_customers_list)].copy()
+    key_tracking_summary = create_grouped_tracking(key_projects_new, "Key Customers Projects (New)")
+    startrow_kp = 5 # กำหนดแถวเริ่มต้นสำหรับ Key Projects Tracking ใน Summary Report
+    key_tracking_summary.to_excel(writer, sheet_name="Summary Report", startrow=startrow_kp, index=False)
+
+    # สร้างและเขียน Other Projects Tracking (เฉพาะโครงการใหม่ใน new_only) ใน Summary Report
+    # ใช้ .copy() เพื่อป้องกัน SettingWithCopyWarning
+    other_projects_new = new_only[~new_only["CustomerCode_str"].isin(key_customers_list)].copy()
+    other_tracking_summary = create_grouped_tracking(other_projects_new, "Other Customers Projects (New)")
+    startrow_op = startrow_kp + len(key_tracking_summary) + 3 # กำหนดแถวเริ่มต้นสำหรับ Other Projects Tracking
+    other_tracking_summary.to_excel(writer, sheet_name="Summary Report", startrow=startrow_op, index=False)
+    # เขียน Sheet "All Data"
+    final_data.to_excel(writer, sheet_name="All Data", index=False)
+
+    # เขียน Sheet "Customer Tracking"
+    customer_tracking.to_excel(writer, sheet_name="Customer Tracking", index=False)
+
+    # เขียน Sheet "Key Customers Tracking"
+    key_customer_tracking.to_excel(writer, sheet_name="Key Customers Tracking", index=False)
+
+files.download(report_file)
+
+print("📊 สรุปผลการทำงาน:")
+print(f"➕ Total Projects : {new_project_count} โครงการ (+{diff_project})")
+print(f"🎯 Total Key Customers Projects : {new_key_customers_count} ราย (+{diff_key_customers})")
+print(f"📋 Total Other Customers Projects : {new_customers_count} บริษัท (+{diff_customers})")
+print(f"\n ดาวน์โหลดไฟล์เรียบร้อยครับ ✅")
+print(f"\n Have a nice day✨")
