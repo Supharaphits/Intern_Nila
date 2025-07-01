@@ -1,0 +1,51 @@
+import os
+import shutil
+import datetime
+
+# === CONFIG ===
+source_folder = '/Users/nidchawaree/Downloads/Intern/Project_FlowMockup'  # Folder ของลูกค้า
+target_folder = '/Users/nidchawaree/Library/CloudStorage/OneDrive-NilaSolutions/onedrive_mock'  # OneDrive
+log_file_path = './script_log.txt'  # ไฟล์ log ที่จะบันทึก
+
+# === MAIN FLOW ===
+# บันทึกว่าเริ่มทำงาน
+with open(log_file_path, 'a') as log_file:
+    log_file.write(f"\n[{datetime.datetime.now()}] เริ่มทำงาน\n")
+
+# ตรวจสอบว่า source_folder มีไฟล์ .xlsx หรือไม่
+log_files = [f for f in os.listdir(source_folder)
+             if f.endswith('.xlsx')]
+
+if not log_files:
+    # ไม่พบไฟล์ → log และจบ
+    print("ไม่พบไฟล์ .xlsx")
+    with open(log_file_path, 'a') as log_file:
+        log_file.write(f"[{datetime.datetime.now()}] ไม่พบไฟล์ .xlsx\n")
+else:
+    # พบไฟล์ → หาไฟล์ล่าสุด (จากเวลา create time)
+    latest_file = max(log_files, key=lambda f: os.path.getctime(os.path.join(source_folder, f)))
+    
+    print(f"พบไฟล์ล่าสุด: {latest_file}")
+
+    # ตรวจสอบว่า OneDrive sync folder พร้อมไหม
+    if os.path.isdir(target_folder) and os.access(target_folder, os.W_OK):
+        # ตั้งชื่อใหม่ → ใส่ timestamp ตอน save
+        timestamp_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        file_base, file_ext = os.path.splitext(latest_file)
+        new_filename = f"{file_base}_{timestamp_str}{file_ext}"
+
+        # คัดลอกไฟล์ → ใช้ชื่อใหม่
+        shutil.copy(os.path.join(source_folder, latest_file), os.path.join(target_folder, new_filename))
+        
+        print(f"คัดลอกไฟล์ {latest_file} → เป็น {new_filename} สำเร็จ → ไปยัง OneDrive")
+        with open(log_file_path, 'a') as log_file:
+            log_file.write(f"[{datetime.datetime.now()}] คัดลอกไฟล์ {latest_file} → เป็น {new_filename} สำเร็จ → OneDrive\n")
+    else:
+        # OneDrive folder ไม่พร้อม → log ไว้
+        print("OneDrive Folder ไม่พร้อม (ไม่พบ folder หรือเขียนไม่ได้)")
+        with open(log_file_path, 'a') as log_file:
+            log_file.write(f"[{datetime.datetime.now()}] OneDrive Folder ไม่พร้อม → ไม่ได้คัดลอกไฟล์\n")
+
+# บันทึก log ว่าสิ้นสุดการทำงาน
+with open(log_file_path, 'a') as log_file:
+    log_file.write(f"[{datetime.datetime.now()}] จบการทำงาน\n")
